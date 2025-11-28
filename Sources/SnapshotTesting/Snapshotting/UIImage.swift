@@ -195,6 +195,9 @@
   import Accelerate.vImage
   import CoreImage.CIKernel
   import MetalPerformanceShaders
+  #if os(macOS)
+    import AppKit
+  #endif
 
   @available(iOS 10.0, tvOS 10.0, macOS 10.13, *)
   func perceptuallyCompare(
@@ -203,6 +206,10 @@
     // Calculate the deltaE values. Each pixel is a value between 0-100.
     // 0 means no difference, 100 means completely opposite.
     let deltaOutputImage = old.applyingLabDeltaE(new)
+
+    // Save the deltaE image to disk for debugging
+    saveDeltaImage(deltaOutputImage)
+
     // Setting the working color space and output color space to NSNull disables color management. This is appropriate when the output
     // of the operations is computational instead of an image intended to be displayed.
     let context = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull()])
@@ -374,5 +381,40 @@
         destinationTexture: destinationTexture
       )
     }
+  }
+
+  private func saveDeltaImage(_ deltaImage: CIImage) {
+    #if os(iOS) || os(tvOS)
+      let context = CIContext()
+      guard let cgImage = context.createCGImage(deltaImage, from: deltaImage.extent) else {
+        return
+      }
+      let uiImage = UIImage(cgImage: cgImage)
+      guard let pngData = uiImage.pngData() else {
+        return
+      }
+    #elseif os(macOS)
+      let context = CIContext()
+      guard let cgImage = context.createCGImage(deltaImage, from: deltaImage.extent) else {
+        return
+      }
+      let nsImage = NSImage(
+        cgImage: cgImage, size: NSSize(width: deltaImage.extent.width, height: deltaImage.extent.height)
+      )
+      guard
+        let tiffData = nsImage.tiffRepresentation,
+        let bitmapImage = NSBitmapImageRep(data: tiffData),
+        let pngData = bitmapImage.representation(using: .png, properties: [:])
+      else {
+        return
+      }
+    #endif
+
+    let fileManager = FileManager.default
+    let deltaDirectoryUrl = fileManager.temporaryDirectory.appendingPathComponent("deltaTests")
+    try! fileManager.createDirectory(at: deltaDirectoryUrl, withIntermediateDirectories: true)
+    let outputPath = deltaDirectoryUrl.appendingPathComponent("/delta_\(Date().timeIntervalSince1970).png")
+    try! pngData.write(to: outputPath)
+    print("Delta image saved to: \(outputPath.path)")
   }
 #endif
